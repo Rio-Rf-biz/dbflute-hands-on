@@ -29,5 +29,6 @@
 /dbflute-intro.*
 /mydbflute/intro_resources
 /mydbflute/dbflute-*
+/dbflute_maihamadb/log/*.log
 
 # application
