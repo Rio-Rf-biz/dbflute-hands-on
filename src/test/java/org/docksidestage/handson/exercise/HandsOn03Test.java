@@ -1,0 +1,322 @@
+package org.docksidestage.handson.exercise;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+import javax.annotation.Resource;
+
+import org.dbflute.cbean.result.ListResultBean;
+import org.docksidestage.handson.dbflute.exbhv.MemberBhv;
+import org.docksidestage.handson.dbflute.exbhv.PurchaseBhv;
+import org.docksidestage.handson.dbflute.exentity.Member;
+import org.docksidestage.handson.dbflute.exentity.Purchase;
+import org.docksidestage.handson.unit.UnitContainerTestCase;
+
+/**
+ * @author r.iwata
+ */
+public class HandsOn03Test extends UnitContainerTestCase {
+
+    @Resource
+    private MemberBhv memberBhv;
+    @Resource
+    private PurchaseBhv purchaseBhv;
+
+    // ===================================================================================
+    //                                                                              Silver
+    //                                                                              ======
+    // [1] 会員名称がSで始まる1968年1月1日以前に生まれた会員を検索
+    // memo
+    // cb.setupSelect_MemberStatus()はMemberStatusテーブルをjoin
+    public void test_会員名称がSで始まる1968年1月1日以前に生まれた会員を検索() throws Exception {
+        // ## Arrange ##
+        LocalDate borderDate = LocalDate.of(1968, 1, 1);
+
+        // ## Act ##
+        ListResultBean<Member> memberList = memberBhv.selectList(cb -> {
+            cb.setupSelect_MemberStatus();
+            cb.query().setMemberName_LikeSearch("S", op -> op.likePrefix());
+            cb.query().setBirthdate_LessEqual(borderDate);
+            cb.query().addOrderBy_Birthdate_Asc();
+        });
+
+        // ## Assert ##
+        assertHasAnyElement(memberList);
+        memberList.forEach(member -> {
+            log("memberName: {}, birthdate: {}, statusName: {}",
+                    member.getMemberName(),
+                    member.getBirthdate(),
+                    member.getMemberStatus().map(s -> s.getMemberStatusName()).orElse(null));
+            assertTrue(member.getMemberName().startsWith("S"));
+            assertFalse(member.getBirthdate().isAfter(borderDate));
+            assertTrue(member.getMemberStatus().isPresent());
+        });
+    }
+
+    // [2] 会員ステータスと会員セキュリティ情報も取得して会員を検索
+    public void test_会員ステータスと会員セキュリティ情報も取得して会員を検索() throws Exception {
+        // ## Arrange ##
+
+        // ## Act ##
+        ListResultBean<Member> memberList = memberBhv.selectList(cb -> {
+            cb.setupSelect_MemberStatus();
+            cb.setupSelect_MemberSecurityAsOne();
+            cb.query().addOrderBy_Birthdate_Asc();
+            cb.query().addOrderBy_MemberId_Asc(); // 生年月日がnullの場合はMemberId昇順
+        });
+
+        // ## Assert ##
+        assertHasAnyElement(memberList);
+        memberList.forEach(member -> {
+            log("member: {}, status: {}, security: {}",
+                    member.getMemberName(),
+                    member.getMemberStatus().map(s -> s.getMemberStatusName()).orElse(null),
+                    member.getMemberSecurityAsOne().map(s -> s.getReminderQuestion()).orElse(null));
+            assertTrue(member.getMemberStatus().isPresent());
+            assertTrue(member.getMemberSecurityAsOne().isPresent());
+        });
+    }
+
+    // [3] 会員セキュリティ情報のリマインダ質問で「2」を含む会員を検索
+    // memo
+    // AsOneは1対1の関連のときは1件しかないことがわかっているので指定
+    // Actでは操作、Assertでは結果が期待通りであることを守備範囲とする
+    // setupSelect_MemberSecurityAsOneを書くとSELECTにセキュリティ情報のテーブルがのってしまう
+    public void test_会員セキュリティ情報のリマインダ質問で2を含む会員を検索() throws Exception {
+        // ## Arrange ##
+
+        // ## Act ##
+        ListResultBean<Member> memberList = memberBhv.selectList(cb -> {
+            // セキュリティ情報自体は取得しないので setupSelect しない
+            cb.query().queryMemberSecurityAsOne().setReminderQuestion_LikeSearch("2", op -> op.likeContain());
+        });
+
+        // ## Assert ##
+        assertHasAnyElement(memberList);
+        memberList.forEach(member -> {
+            // 検証用に別途取得（取得対象外のため）
+            String reminder = memberBhv.selectEntity(cb -> {
+                cb.setupSelect_MemberSecurityAsOne();
+                cb.query().setMemberId_Equal(member.getMemberId());
+            }).flatMap(m -> m.getMemberSecurityAsOne()).map(s -> s.getReminderQuestion()).orElse(null);
+            log("member: {}, reminder: {}", member.getMemberName(), reminder);
+            assertNotNull(reminder);
+            assertTrue(reminder.contains("2"));
+        });
+    }
+
+    // ===================================================================================
+    //                                                                                Gold
+    //                                                                                ====
+    // [4] 会員ステータスの表示順カラムで会員を並べて検索
+    public void test_会員ステータスの表示順カラムで会員を並べて検索() throws Exception {
+        // ## Arrange ##
+
+        // ## Act ##
+        ListResultBean<Member> memberList = memberBhv.selectList(cb -> {
+            // ステータスのデータ自体は取得しない（Selectしない）→ orderByだけだとINNER JOIN追加される
+            cb.query().queryMemberStatus().addOrderBy_DisplayOrder_Asc();
+            cb.query().addOrderBy_MemberId_Desc();
+        });
+
+        // ## Assert ##
+        assertHasAnyElement(memberList);
+        // ステータスデータが取れていないこと（OptionalEntityがempty）
+        memberList.forEach(member -> {
+            assertFalse(member.getMemberStatus().isPresent());
+        });
+        // ステータスごとに固まって並んでいることを確認
+        // → ステータスコードが切り替わったら、それ以前のコードが再登場しないことをチェック
+        String prevStatusCode = null;
+        java.util.Set<String> seenCodes = new java.util.HashSet<>();
+        for (Member member : memberList) {
+            String code = member.getMemberStatusCode();
+            log("memberId: {}, statusCode: {}", member.getMemberId(), code);
+            if (!code.equals(prevStatusCode)) {
+                assertFalse(seenCodes.contains(code));
+                seenCodes.add(code);
+                prevStatusCode = code;
+            }
+        }
+    }
+
+    // [5] 生年月日が存在する会員の購入を検索
+    // memo
+    // .withXXX()は「取った先のテーブルから、さらに別のテーブルも取る」というネスト指定
+    //
+    public void test_生年月日が存在する会員の購入を検索() throws Exception {
+        // ## Arrange ##
+
+        // ## Act ##
+        ListResultBean<Purchase> purchaseList = purchaseBhv.selectList(cb -> {
+            cb.setupSelect_Member().withMemberStatus(); // 「Purchase → Member」と「Member → MemberStatus」の2段取る
+            cb.setupSelect_Product(); //「Purchase → Product」だけ取る
+            cb.query().queryMember().setBirthdate_IsNotNull();
+            cb.query().addOrderBy_PurchaseDatetime_Desc();
+            cb.query().addOrderBy_PurchasePrice_Desc();
+            cb.query().addOrderBy_ProductId_Asc();
+            cb.query().addOrderBy_MemberId_Asc();
+        });
+
+        // ## Assert ##
+        assertHasAnyElement(purchaseList);
+        purchaseList.forEach(purchase -> {
+            Member member = purchase.getMember().get();
+            log("memberName: {}, statusName: {}, productName: {}, birthdate: {}",
+                    member.getMemberName(),
+                    member.getMemberStatus().map(s -> s.getMemberStatusName()).orElse(null),
+                    purchase.getProduct().map(p -> p.getProductName()).orElse(null),
+                    member.getBirthdate());
+            assertNotNull(member.getBirthdate());
+        });
+    }
+
+    // [6] 2005年10月1日から3日までに正式会員になった会員を検索
+    // memo
+    // atStartOfDayは0:00にするもの
+    // setFormalizedDatetime_FromToの引数の型がLocalDateTimeなので時分秒を追加
+    public void test_2005年10月1日から3日までに正式会員になった会員を検索() throws Exception {
+        // ## Arrange ##
+        LocalDate fromDate = LocalDate.of(2005, 10, 1);
+        LocalDate toDate = LocalDate.of(2005, 10, 3);
+
+        // ## Act ##
+        ListResultBean<Member> memberList = memberBhv.selectList(cb -> {
+            cb.setupSelect_MemberStatus();
+            // 取得カラムを絞る：会員ステータス名称のみ（コードはPKで自動含有）
+            cb.specify().specifyMemberStatus().columnMemberStatusName();
+            cb.query().setFormalizedDatetime_FromTo(fromDate.atStartOfDay(), toDate.atStartOfDay(), op -> op.compareAsDate());
+            cb.query().setMemberName_LikeSearch("vi", op -> op.likeContain());
+        });
+
+        // ## Assert ##
+        assertHasAnyElement(memberList);
+        memberList.forEach(member -> {
+            log("member: {}, formalized: {}, statusName: {}",
+                    member.getMemberName(),
+                    member.getFormalizedDatetime(),
+                    member.getMemberStatus().map(s -> s.getMemberStatusName()).orElse(null));
+            assertNotNull(member.getFormalizedDatetime());
+
+            LocalDate formalizedDate = member.getFormalizedDatetime().toLocalDate();
+            assertFalse(formalizedDate.isBefore(fromDate));
+            assertFalse(formalizedDate.isAfter(toDate));
+
+            // ステータスはコードと名称のみ取得されている
+            assertTrue(member.getMemberStatus().isPresent());
+            assertNotNull(member.getMemberStatus().get().getMemberStatusName());
+        });
+    }
+
+    // ===================================================================================
+    //                                                                            Platinum
+    //                                                                            ========
+    // [7] 正式会員になってから一週間以内の購入を検索
+    // memo
+    // fd:FormalizedDatetime（正式会員日時）
+    // pd:PurchaseDatetime（購入日時）
+    public void test_正式会員になってから一週間以内の購入を検索() throws Exception {
+        // ## Arrange ##
+
+        // ## Act ##
+        // ColumnQueryは数値列前提で日付加算をDB側に投げられないため、
+        // 「購入日時 ∈ [正式会員日時, 正式会員日時+7日]」はJavaで判定する。
+        ListResultBean<Purchase> rawList = purchaseBhv.selectList(cb -> {
+            cb.setupSelect_Member().withMemberStatus();
+            cb.setupSelect_Member().withMemberSecurityAsOne();
+            cb.setupSelect_Product().withProductStatus();
+            cb.setupSelect_Product().withProductCategory().withProductCategorySelf();
+            cb.query().queryMember().setFormalizedDatetime_IsNotNull();
+        });
+        List<Purchase> purchaseList = rawList.stream()
+                .filter(p -> {
+                    LocalDateTime fd = p.getMember().get().getFormalizedDatetime();
+                    LocalDateTime pd = p.getPurchaseDatetime();
+                    return !pd.isBefore(fd) && !pd.isAfter(fd.plusDays(7));
+                })
+                .collect(Collectors.toList());
+
+        // ## Assert ##
+        assertHasAnyElement(purchaseList);
+        purchaseList.forEach(purchase -> {
+            Member member = purchase.getMember().get();
+            String parentCategoryName = purchase.getProduct()
+                    .flatMap(p -> p.getProductCategory())
+                    .flatMap(c -> c.getProductCategorySelf())
+                    .map(pc -> pc.getProductCategoryName())
+                    .orElse(null);
+            log("purchaseDatetime: {}, formalized: {}, parentCategory: {}",
+                    purchase.getPurchaseDatetime(), member.getFormalizedDatetime(), parentCategoryName);
+            assertNotNull(parentCategoryName);
+            // 購入日時が正式会員日時から1週間以内
+            assertFalse(purchase.getPurchaseDatetime().isBefore(member.getFormalizedDatetime()));
+            assertFalse(purchase.getPurchaseDatetime().isAfter(member.getFormalizedDatetime().plusDays(7)));
+        });
+    }
+
+    // [8] 1974年までに生まれた、もしくは不明の会員を検索
+    public void test_1974年までに生まれたもしくは不明の会員を検索() throws Exception {
+        // ## Arrange ##
+        // 画面から "1974/01/01" がリクエストされた想定。日付移動はせずそのまま使う
+        String birthdateStr = "1974/01/01";
+        LocalDate borderDate = LocalDate.parse(birthdateStr, DateTimeFormatter.ofPattern("yyyy/MM/dd"));
+        // きわどいデータを作成（1974/12/31は含まれる想定、1975/01/01は含まれない想定）
+        adjustMember_Birthdate();
+
+        // ## Act ##
+        ListResultBean<Member> memberList = memberBhv.selectList(cb -> {
+            cb.setupSelect_MemberStatus();
+            cb.setupSelect_MemberSecurityAsOne();
+            cb.setupSelect_MemberWithdrawalAsOne();
+            cb.specify().specifyMemberStatus().columnMemberStatusName();
+            cb.specify().specifyMemberSecurityAsOne().columnReminderQuestion();
+            cb.specify().specifyMemberSecurityAsOne().columnReminderAnswer();
+            cb.specify().specifyMemberWithdrawalAsOne().columnWithdrawalReasonInputText();
+            cb.orScopeQuery(orCB -> {
+                orCB.query().setBirthdate_FromTo(null, borderDate, op -> op.compareAsYear().allowOneSide());
+                orCB.query().setBirthdate_IsNull();
+            });
+            cb.query().addOrderBy_Birthdate_Asc().withNullsFirst();
+        });
+
+        // ## Assert ##
+        assertHasAnyElement(memberList);
+        // 生まれが不明の会員が先頭、若い順で並ぶ
+        boolean nullSeen = false;
+        boolean nonNullSeen = false;
+        for (Member member : memberList) {
+            log("name: {}, birthdate: {}, status: {}, reminderQ: {}, reminderA: {}, withdrawalText: {}",
+                    member.getMemberName(),
+                    Optional.ofNullable(member.getBirthdate()).map(d -> d.toString()).orElse("none"),
+                    member.getMemberStatus().map(s -> s.getMemberStatusName()).orElse("none"),
+                    member.getMemberSecurityAsOne().map(s -> s.getReminderQuestion()).orElse("none"),
+                    member.getMemberSecurityAsOne().map(s -> s.getReminderAnswer()).orElse("none"),
+                    member.getMemberWithdrawalAsOne().map(w -> w.getWithdrawalReasonInputText()).orElse("none"));
+            LocalDate birthdate = member.getBirthdate();
+            assertTrue(birthdate == null || !birthdate.isAfter(LocalDate.of(1974, 12, 31)));
+            nullSeen = nullSeen || birthdate == null;
+            nonNullSeen = nonNullSeen || birthdate != null;
+            assertFalse(birthdate == null && nonNullSeen);
+        }
+        assertTrue(nullSeen); // 不明の会員が存在し、先頭に並んでいる
+        // きわどいデータの確認: 1974/12/31の会員は含まれる、1975/01/01の会員は含まれない
+        assertTrue(memberList.stream().anyMatch(m -> Integer.valueOf(3).equals(m.getMemberId())));
+        assertFalse(memberList.stream().anyMatch(m -> Integer.valueOf(4).equals(m.getMemberId())));
+    }
+
+    private void adjustMember_Birthdate() {
+        Member m1974 = new Member();
+        m1974.setMemberId(3);
+        m1974.setBirthdate(LocalDate.of(1974, 12, 31));
+        memberBhv.updateNonstrict(m1974);
+
+        Member m1975 = new Member();
+        m1975.setMemberId(4);
+        m1975.setBirthdate(LocalDate.of(1975, 1, 1));
+        memberBhv.updateNonstrict(m1975);
+    }
+}

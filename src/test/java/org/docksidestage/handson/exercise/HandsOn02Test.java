@@ -2,7 +2,9 @@ package org.docksidestage.handson.exercise;
 
 import javax.annotation.Resource;
 
+import org.dbflute.cbean.result.ListResultBean;
 import org.docksidestage.handson.dbflute.exbhv.MemberBhv;
+import org.docksidestage.handson.dbflute.exentity.Member;
 import org.docksidestage.handson.unit.UnitContainerTestCase;
 
 // #1on1: Maven/Gradleの役割 (2026/05/01)
@@ -55,7 +57,7 @@ public class HandsOn02Test extends UnitContainerTestCase {
     @Resource
     private MemberBhv memberBhv;
 
-    public void test_existsTestData() throws Exception {
+    public void test_テストデータが存在すること() throws Exception {
         // ## Arrange ##
 
         // ## Act ##
@@ -64,5 +66,61 @@ public class HandsOn02Test extends UnitContainerTestCase {
         // ## Assert ##
         log("member count: {}", count);
         assertTrue(count > 0);
+    }
+
+    // memo
+    // https://dbflute.seasar.org/ja/manual/function/ormapper/behavior/select/selectlist.html#override
+    public void test_会員名称がSで始まる会員を検索できること() throws Exception {
+        // ## Arrange ##
+
+        // ## Act ##
+        ListResultBean<Member> memberList = memberBhv.selectList(cb -> {
+            cb.query().setMemberName_LikeSearch("S", op -> op.likePrefix());
+            cb.query().addOrderBy_MemberName_Asc();
+        });
+    
+        // ## Assert ##
+        assertHasAnyElement(memberList);
+        memberList.forEach(member -> {
+            String memberName = member.getMemberName();
+            log("memberName: {}", memberName);
+            assertTrue(memberName.startsWith("S"));
+        });
+    }
+
+    // memo
+    // selectXXで補完した後は_llでさらに補完
+    // acceptPKは主キーを条件として指定するメソッド
+    // alwaysPresentはエンティティが存在しなければ例外を投げる
+
+    // memberIdを9999にしたらEntityAlreadyDeletedExceptionが出た
+    // アドバイスやクエリーの不備、投げられたクエリがメッセージとして出ていた。わかりやすい。
+    public void test_会員IDが1の会員を検索できること() throws Exception {
+        // ## Arrange ##
+
+        // ## Act ##
+        // ## Assert ##
+        memberBhv.selectEntity(cb -> cb.acceptPK(1)).alwaysPresent(member -> {
+            Integer memberId = member.getMemberId();
+            log("memberId: {}", memberId);
+            assertEquals(1, memberId);
+        });
+    }
+    
+    public void test_生年月日がない会員を検索できること() throws Exception {
+        // ## Arrange ##
+
+        // ## Act ##
+        ListResultBean<Member> memberList = memberBhv.selectList(cb -> {
+            cb.query().setBirthdate_IsNull();
+            cb.query().addOrderBy_UpdateDatetime_Desc();
+        });
+
+        // ## Assert ##
+        assertHasAnyElement(memberList);
+        memberList.forEach(member -> {
+            log("memberName: {}, birthdate: {}", member.getMemberName(), member.getBirthdate());
+            assertNull(member.getBirthdate());
+        });
     }
 }
