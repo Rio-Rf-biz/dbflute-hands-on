@@ -100,6 +100,10 @@ public class HandsOn02Test extends UnitContainerTestCase {
 
         // ## Act ##
         // ## Assert ##
+        // #1on1: javatryのstep8のorElseThrow()ジレンマと話をつなげてみた (2026/05/15)
+        // DBFlute の Optional は、問答無用get() (alwaysPresent()) でも、
+        // 例外メッセージがリッチでデバッグしやすいようにして、ジレンマを解決している。
+        // alwaysPresent() ガンガン使ってOK。
         memberBhv.selectEntity(cb -> cb.acceptPK(1)).alwaysPresent(member -> {
             Integer memberId = member.getMemberId();
             log("memberId: {}", memberId);

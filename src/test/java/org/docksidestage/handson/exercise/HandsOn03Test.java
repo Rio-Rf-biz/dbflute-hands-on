@@ -47,6 +47,12 @@ public class HandsOn03Test extends UnitContainerTestCase {
         // ## Assert ##
         assertHasAnyElement(memberList);
         memberList.forEach(member -> {
+            // TODO iwata map()も悪くないけど、ここも「なかったら落ちて良い場面」なので... by jflute (2026/05/15)
+            // get(), orElseThrow(引数なし) でもいいかなと。すぐ後で member.getMemberStatus().isPresent() してるし。
+            // へたに orElse(null) とかやると、読み手が「あれ？ないことあるのかな？」って勘繰ってしまう。
+            // ここでget()しちゃえば、member.getMemberStatus().isPresent()のアサートの代わりになる。
+            // TODO iwata getMemberName(), getBirthdate() いっぱい呼んでるので、変数に抽出してみましょう by jflute (2026/05/15)
+            // assertのところ、文字が込み入ってるので、スッキリさせたい。assertのところこそレビューワーが読むところ。
             log("memberName: {}, birthdate: {}, statusName: {}",
                     member.getMemberName(),
                     member.getBirthdate(),
@@ -76,6 +82,7 @@ public class HandsOn03Test extends UnitContainerTestCase {
                     member.getMemberName(),
                     member.getMemberStatus().map(s -> s.getMemberStatusName()).orElse(null),
                     member.getMemberSecurityAsOne().map(s -> s.getReminderQuestion()).orElse(null));
+            // TODO jflute 1on1にてカージナリティのお話 (2026/05/15)
             assertTrue(member.getMemberStatus().isPresent());
             assertTrue(member.getMemberSecurityAsOne().isPresent());
         });
@@ -99,6 +106,7 @@ public class HandsOn03Test extends UnitContainerTestCase {
         assertHasAnyElement(memberList);
         memberList.forEach(member -> {
             // 検証用に別途取得（取得対象外のため）
+            // TODO iwata 基点テーブルがMEMBERである必要がないような？MEMBER_SECURITYを基点にして検索でも良いのでは？ by jflute (2026/05/15)
             String reminder = memberBhv.selectEntity(cb -> {
                 cb.setupSelect_MemberSecurityAsOne();
                 cb.query().setMemberId_Equal(member.getMemberId());
@@ -138,6 +146,10 @@ public class HandsOn03Test extends UnitContainerTestCase {
             log("memberId: {}, statusCode: {}", member.getMemberId(), code);
             if (!code.equals(prevStatusCode)) {
                 assertFalse(seenCodes.contains(code));
+                // TODO iwata add()とpreの設定、ifの外でも良いのでは？読み手の負担軽減のために by jflute (2026/05/15)
+                // ifの中に入ってると、その変数のライフサイクルに分岐があるので、頭の中でちょっと考える。
+                // seenCodesは重複がないsetなので、とにかく毎回突っ込んでseenのcodeたちってニュアンス。
+                // prevStatusCodeはprevの意味が少し変わって、必ず一個前のstatusってニュアンス。
                 seenCodes.add(code);
                 prevStatusCode = code;
             }
@@ -152,6 +164,9 @@ public class HandsOn03Test extends UnitContainerTestCase {
         // ## Arrange ##
 
         // ## Act ##
+        // #1on1: 基点テーブルバッチリGood (2026/05/15)
+        // 些細なことだけど、もっと複雑な検索とかになると、基点テーブルがわかりにくくなる。
+        // そのとき、基点テーブルを間違えると、ギャップでどんどん苦しくなる。
         ListResultBean<Purchase> purchaseList = purchaseBhv.selectList(cb -> {
             cb.setupSelect_Member().withMemberStatus(); // 「Purchase → Member」と「Member → MemberStatus」の2段取る
             cb.setupSelect_Product(); //「Purchase → Product」だけ取る
@@ -181,6 +196,9 @@ public class HandsOn03Test extends UnitContainerTestCase {
     // setFormalizedDatetime_FromToの引数の型がLocalDateTimeなので時分秒を追加
     public void test_2005年10月1日から3日までに正式会員になった会員を検索() throws Exception {
         // ## Arrange ##
+        // #1on1: 10/3を含むか？ (2026/05/15)
+        // 一方で、来週の水曜まで休みます、は何曜日に出社？
+        // 自然言語の日付表現って曖昧なもの。なので常に意識して、確認をする習慣を。
         LocalDate fromDate = LocalDate.of(2005, 10, 1);
         LocalDate toDate = LocalDate.of(2005, 10, 3);
 
@@ -188,6 +206,7 @@ public class HandsOn03Test extends UnitContainerTestCase {
         ListResultBean<Member> memberList = memberBhv.selectList(cb -> {
             cb.setupSelect_MemberStatus();
             // 取得カラムを絞る：会員ステータス名称のみ（コードはPKで自動含有）
+            // #1on1: compareAsDate() のお話 (2026/05/15)
             cb.specify().specifyMemberStatus().columnMemberStatusName();
             cb.query().setFormalizedDatetime_FromTo(fromDate.atStartOfDay(), toDate.atStartOfDay(), op -> op.compareAsDate());
             cb.query().setMemberName_LikeSearch("vi", op -> op.likeContain());
@@ -223,8 +242,10 @@ public class HandsOn03Test extends UnitContainerTestCase {
         // ## Arrange ##
 
         // ## Act ##
+        // #1on1: このコメントGood, ColumnQueryを知った上でこうしてるってのが伝わる (2026/05/15)
         // ColumnQueryは数値列前提で日付加算をDB側に投げられないため、
         // 「購入日時 ∈ [正式会員日時, 正式会員日時+7日]」はJavaで判定する。
+        // TODO iwata 一方で、ColumnQueryで日付加算もできるので、チャレンジしてみましょう by jflute (2026/05/15)
         ListResultBean<Purchase> rawList = purchaseBhv.selectList(cb -> {
             cb.setupSelect_Member().withMemberStatus();
             cb.setupSelect_Member().withMemberSecurityAsOne();
@@ -232,6 +253,7 @@ public class HandsOn03Test extends UnitContainerTestCase {
             cb.setupSelect_Product().withProductCategory().withProductCategorySelf();
             cb.query().queryMember().setFormalizedDatetime_IsNotNull();
         });
+        // TODO iwata これはこれで思い出として、コメントアウトとかで残しておきましょう by jflute (2026/05/15)
         List<Purchase> purchaseList = rawList.stream()
                 .filter(p -> {
                     LocalDateTime fd = p.getMember().get().getFormalizedDatetime();
@@ -249,6 +271,9 @@ public class HandsOn03Test extends UnitContainerTestCase {
                     .flatMap(c -> c.getProductCategorySelf())
                     .map(pc -> pc.getProductCategoryName())
                     .orElse(null);
+            // TODO iwata getPurchaseDatetime()/getFormalizedDatetime()ノイズが多いので、変数にして欲しい by jflute (2026/05/15)
+            // ロジカルな行に事務的な処理を含めたくない。ロジカルな行こそロジックに集中して読みたい。
+            // こういう配慮がレビューしやすいコードにつながる。
             log("purchaseDatetime: {}, formalized: {}, parentCategory: {}",
                     purchase.getPurchaseDatetime(), member.getFormalizedDatetime(), parentCategoryName);
             assertNotNull(parentCategoryName);
@@ -276,6 +301,7 @@ public class HandsOn03Test extends UnitContainerTestCase {
             cb.specify().specifyMemberSecurityAsOne().columnReminderQuestion();
             cb.specify().specifyMemberSecurityAsOne().columnReminderAnswer();
             cb.specify().specifyMemberWithdrawalAsOne().columnWithdrawalReasonInputText();
+            // TODO iwata orScopeQuery()も悪くないけど、FromToOptionだけで or IsNull も表現できます by jflute (2026/05/15)
             cb.orScopeQuery(orCB -> {
                 orCB.query().setBirthdate_FromTo(null, borderDate, op -> op.compareAsYear().allowOneSide());
                 orCB.query().setBirthdate_IsNull();
