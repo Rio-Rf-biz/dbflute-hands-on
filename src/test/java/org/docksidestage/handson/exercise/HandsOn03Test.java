@@ -3,14 +3,13 @@ package org.docksidestage.handson.exercise;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 import javax.annotation.Resource;
 
 import org.dbflute.cbean.result.ListResultBean;
 import org.docksidestage.handson.dbflute.exbhv.MemberBhv;
+import org.docksidestage.handson.dbflute.exbhv.MemberSecurityBhv;
 import org.docksidestage.handson.dbflute.exbhv.PurchaseBhv;
 import org.docksidestage.handson.dbflute.exentity.Member;
 import org.docksidestage.handson.dbflute.exentity.Purchase;
@@ -25,6 +24,8 @@ public class HandsOn03Test extends UnitContainerTestCase {
     private MemberBhv memberBhv;
     @Resource
     private PurchaseBhv purchaseBhv;
+    @Resource
+    private MemberSecurityBhv memberSecurityBhv;
 
     // ===================================================================================
     //                                                                              Silver
@@ -47,19 +48,18 @@ public class HandsOn03Test extends UnitContainerTestCase {
         // ## Assert ##
         assertHasAnyElement(memberList);
         memberList.forEach(member -> {
-            // TODO iwata map()も悪くないけど、ここも「なかったら落ちて良い場面」なので... by jflute (2026/05/15)
+            // TODO done iwata map()も悪くないけど、ここも「なかったら落ちて良い場面」なので... by jflute (2026/05/15)
             // get(), orElseThrow(引数なし) でもいいかなと。すぐ後で member.getMemberStatus().isPresent() してるし。
             // へたに orElse(null) とかやると、読み手が「あれ？ないことあるのかな？」って勘繰ってしまう。
             // ここでget()しちゃえば、member.getMemberStatus().isPresent()のアサートの代わりになる。
-            // TODO iwata getMemberName(), getBirthdate() いっぱい呼んでるので、変数に抽出してみましょう by jflute (2026/05/15)
+            // TODO done iwata getMemberName(), getBirthdate() いっぱい呼んでるので、変数に抽出してみましょう by jflute (2026/05/15)
             // assertのところ、文字が込み入ってるので、スッキリさせたい。assertのところこそレビューワーが読むところ。
-            log("memberName: {}, birthdate: {}, statusName: {}",
-                    member.getMemberName(),
-                    member.getBirthdate(),
-                    member.getMemberStatus().map(s -> s.getMemberStatusName()).orElse(null));
-            assertTrue(member.getMemberName().startsWith("S"));
-            assertFalse(member.getBirthdate().isAfter(borderDate));
-            assertTrue(member.getMemberStatus().isPresent());
+            String memberName = member.getMemberName();
+            LocalDate birthdate = member.getBirthdate();
+            String statusName = member.getMemberStatus().get().getMemberStatusName();
+            log("memberName: {}, birthdate: {}, statusName: {}", memberName, birthdate, statusName);
+            assertTrue(memberName.startsWith("S"));
+            assertFalse(birthdate.isAfter(borderDate));
         });
     }
 
@@ -106,13 +106,12 @@ public class HandsOn03Test extends UnitContainerTestCase {
         assertHasAnyElement(memberList);
         memberList.forEach(member -> {
             // 検証用に別途取得（取得対象外のため）
-            // TODO iwata 基点テーブルがMEMBERである必要がないような？MEMBER_SECURITYを基点にして検索でも良いのでは？ by jflute (2026/05/15)
-            String reminder = memberBhv.selectEntity(cb -> {
-                cb.setupSelect_MemberSecurityAsOne();
+            // TODO done iwata 基点テーブルがMEMBERである必要がないような？MEMBER_SECURITYを基点にして検索でも良いのでは？ by jflute (2026/05/15)
+            String reminder = memberSecurityBhv.selectEntity(cb -> {
                 cb.query().setMemberId_Equal(member.getMemberId());
-            }).flatMap(m -> m.getMemberSecurityAsOne()).map(s -> s.getReminderQuestion()).orElse(null);
+            }).get().getReminderQuestion();
             log("member: {}, reminder: {}", member.getMemberName(), reminder);
-            assertNotNull(reminder);
+
             assertTrue(reminder.contains("2"));
         });
     }
@@ -146,13 +145,13 @@ public class HandsOn03Test extends UnitContainerTestCase {
             log("memberId: {}, statusCode: {}", member.getMemberId(), code);
             if (!code.equals(prevStatusCode)) {
                 assertFalse(seenCodes.contains(code));
-                // TODO iwata add()とpreの設定、ifの外でも良いのでは？読み手の負担軽減のために by jflute (2026/05/15)
+                // TODO done iwata add()とpreの設定、ifの外でも良いのでは？読み手の負担軽減のために by jflute (2026/05/15)
                 // ifの中に入ってると、その変数のライフサイクルに分岐があるので、頭の中でちょっと考える。
                 // seenCodesは重複がないsetなので、とにかく毎回突っ込んでseenのcodeたちってニュアンス。
                 // prevStatusCodeはprevの意味が少し変わって、必ず一個前のstatusってニュアンス。
-                seenCodes.add(code);
-                prevStatusCode = code;
             }
+            seenCodes.add(code);
+            prevStatusCode = code;
         }
     }
 
@@ -245,22 +244,28 @@ public class HandsOn03Test extends UnitContainerTestCase {
         // #1on1: このコメントGood, ColumnQueryを知った上でこうしてるってのが伝わる (2026/05/15)
         // ColumnQueryは数値列前提で日付加算をDB側に投げられないため、
         // 「購入日時 ∈ [正式会員日時, 正式会員日時+7日]」はJavaで判定する。
-        // TODO iwata 一方で、ColumnQueryで日付加算もできるので、チャレンジしてみましょう by jflute (2026/05/15)
-        ListResultBean<Purchase> rawList = purchaseBhv.selectList(cb -> {
+        // TODO done iwata 一方で、ColumnQueryで日付加算もできるので、チャレンジしてみましょう by jflute (2026/05/15)
+        ListResultBean<Purchase> purchaseList = purchaseBhv.selectList(cb -> {
             cb.setupSelect_Member().withMemberStatus();
             cb.setupSelect_Member().withMemberSecurityAsOne();
             cb.setupSelect_Product().withProductStatus();
             cb.setupSelect_Product().withProductCategory().withProductCategorySelf();
             cb.query().queryMember().setFormalizedDatetime_IsNotNull();
+            cb.columnQuery(c -> c.specify().columnPurchaseDatetime())
+                .greaterEqual(c -> c.specify().specifyMember().columnFormalizedDatetime());
+            cb.columnQuery(c -> c.specify().columnPurchaseDatetime())
+                .lessEqual(c -> c.specify().specifyMember().columnFormalizedDatetime())
+                .convert(op -> op.addDay(7));
         });
-        // TODO iwata これはこれで思い出として、コメントアウトとかで残しておきましょう by jflute (2026/05/15)
-        List<Purchase> purchaseList = rawList.stream()
-                .filter(p -> {
-                    LocalDateTime fd = p.getMember().get().getFormalizedDatetime();
-                    LocalDateTime pd = p.getPurchaseDatetime();
-                    return !pd.isBefore(fd) && !pd.isAfter(fd.plusDays(7));
-                })
-                .collect(Collectors.toList());
+
+        // TODO done iwata これはこれで思い出として、コメントアウトとかで残しておきましょう by jflute (2026/05/15)
+//        List<Purchase> purchaseList = rawList.stream()
+//                .filter(p -> {
+//                    LocalDateTime fd = p.getMember().get().getFormalizedDatetime();
+//                    LocalDateTime pd = p.getPurchaseDatetime();
+//                    return !pd.isBefore(fd) && !pd.isAfter(fd.plusDays(7));
+//                })
+//                .collect(Collectors.toList());
 
         // ## Assert ##
         assertHasAnyElement(purchaseList);
@@ -271,15 +276,16 @@ public class HandsOn03Test extends UnitContainerTestCase {
                     .flatMap(c -> c.getProductCategorySelf())
                     .map(pc -> pc.getProductCategoryName())
                     .orElse(null);
-            // TODO iwata getPurchaseDatetime()/getFormalizedDatetime()ノイズが多いので、変数にして欲しい by jflute (2026/05/15)
+            // TODO done iwata getPurchaseDatetime()/getFormalizedDatetime()ノイズが多いので、変数にして欲しい by jflute (2026/05/15)
             // ロジカルな行に事務的な処理を含めたくない。ロジカルな行こそロジックに集中して読みたい。
             // こういう配慮がレビューしやすいコードにつながる。
-            log("purchaseDatetime: {}, formalized: {}, parentCategory: {}",
-                    purchase.getPurchaseDatetime(), member.getFormalizedDatetime(), parentCategoryName);
+            LocalDateTime purchaseDatetime = purchase.getPurchaseDatetime();
+            LocalDateTime formalizedDatetime = member.getFormalizedDatetime();
+            log("purchaseDatetime: {}, formalized: {}, parentCategory: {}", purchaseDatetime, formalizedDatetime, parentCategoryName);
             assertNotNull(parentCategoryName);
             // 購入日時が正式会員日時から1週間以内
-            assertFalse(purchase.getPurchaseDatetime().isBefore(member.getFormalizedDatetime()));
-            assertFalse(purchase.getPurchaseDatetime().isAfter(member.getFormalizedDatetime().plusDays(7)));
+            assertFalse(purchaseDatetime.isBefore(formalizedDatetime));
+            assertFalse(purchaseDatetime.isAfter(formalizedDatetime.plusDays(7)));
         });
     }
 
