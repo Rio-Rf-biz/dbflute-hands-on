@@ -48,11 +48,11 @@ public class HandsOn03Test extends UnitContainerTestCase {
         // ## Assert ##
         assertHasAnyElement(memberList);
         memberList.forEach(member -> {
-            // TODO done iwata map()も悪くないけど、ここも「なかったら落ちて良い場面」なので... by jflute (2026/05/15)
+            // done iwata map()も悪くないけど、ここも「なかったら落ちて良い場面」なので... by jflute (2026/05/15)
             // get(), orElseThrow(引数なし) でもいいかなと。すぐ後で member.getMemberStatus().isPresent() してるし。
             // へたに orElse(null) とかやると、読み手が「あれ？ないことあるのかな？」って勘繰ってしまう。
             // ここでget()しちゃえば、member.getMemberStatus().isPresent()のアサートの代わりになる。
-            // TODO done iwata getMemberName(), getBirthdate() いっぱい呼んでるので、変数に抽出してみましょう by jflute (2026/05/15)
+            // done iwata getMemberName(), getBirthdate() いっぱい呼んでるので、変数に抽出してみましょう by jflute (2026/05/15)
             // assertのところ、文字が込み入ってるので、スッキリさせたい。assertのところこそレビューワーが読むところ。
             String memberName = member.getMemberName();
             LocalDate birthdate = member.getBirthdate();
@@ -83,9 +83,49 @@ public class HandsOn03Test extends UnitContainerTestCase {
                     member.getMemberStatus().map(s -> s.getMemberStatusName()).orElse(null),
                     member.getMemberSecurityAsOne().map(s -> s.getReminderQuestion()).orElse(null));
             // TODO jflute 1on1にてカージナリティのお話 (2026/05/15)
+            // カージナリティとは？日本語としては「多重度」
+            // DBにおいてカージナリティという言葉使う場面が二つ:
+            //
+            // o カラムのカージナリティ // カラムのデータの種類数みたいなもの
+            //   (indexのお話、btreeのお話)
+            //
+            // o テーブル間のカージナリティ
+            //
+            // ここでは、テーブル間のカージナリティのお話。
+            //
+            // 第一段階: (数)
+            // 会員1人につき、購入は？ → 多 (逆から見たら会員は1)
+            // 会員1人につき、ステータスは？ → 1 (逆から見たら会員は多)
+            // 会員1人につき、セキュリティは？ → 1 (逆から見ても会員は1)
+            // one-to-many, many-to-one, one-to-one という関係性。
+            // 1:n とか 1:多 とか色々な表現方法があるけど同じ。
+            //
+            // 第二段階: (必須)
+            // 会員1人につき、セキュリティは必ずあるか？ → ありそう？あると言い切れる？
+            // 会員1人につき、退会情報は必ずあるか？ → ないこともある
+            //
+            // 1:1 ではなく、1 : 0..1 / 1 : 1 
+            // 1:n ではなく、1 : 0..n / 1 : 1..n 
+            // 
+            // 会員から見て会員ステータスは、必ず存在するものでしょうか？その保証は？
+            //  → NotNull制約があるので、少なくと null で存在しないってことはない
+            //  → FK制約(外部キー制約)があるので、デタラメなコードで存在しないってことはない
+            //  → だから、(探しにさえ行けば)必ず存在すると言い切れる
+            //  → 物理的に保証されている: NotNullのFKだから
+            //
+            // 会員から見て会員セキュリティは、必ず存在するものでしょうか？その保証は？
+            //  → 探しに行く方向と、FKの方向が逆、DB制約的には参照されてる保証はない
+            //  → リレーションシップ線の黒丸、ないかもしれないの表現
+            //  → ↑これはERD上のドキュメント表現なので、実際にDBMSに何か情報として作用するわけじゃない
+            //  → つまり、物理的な制約ではなく、論理的な制約(業務的な制約)、つまり人間の決め事
+            //  → もういっこ、テーブルコメントに「会員一人につき必ず一つのセキュリティ情報がある」って書いてある
+            //
+            // ※一方で、ERDのカージナリティ表現がただしくされてるか？というのは現場の別問題（＞＜。
+            //
             assertTrue(member.getMemberStatus().isPresent());
             assertTrue(member.getMemberSecurityAsOne().isPresent());
         });
+        // #1on1: SchemaHTML自体のお勉強 (2026/05/22)
     }
 
     // [3] 会員セキュリティ情報のリマインダ質問で「2」を含む会員を検索
@@ -104,9 +144,14 @@ public class HandsOn03Test extends UnitContainerTestCase {
 
         // ## Assert ##
         assertHasAnyElement(memberList);
+        // #1on1: 本来だったら、n+1問題対応してもらうとかあるところ (2026/05/22)
+        // n+1 の n は、memberListの件数(20件として)。20+1 = 21 回のSQLが発行されることになる。
+        // 一気に取るのと、分けて取るので、(業務的な)データの総量は、そんなに変わらない。
+        // でも、SQL文字列、その文字列を解釈する処理コスト、データ通信上の事務的なコストなどなど、
+        // そういうのが掛け算になって、地味に遅くなる。配送料みたいなもの。
         memberList.forEach(member -> {
             // 検証用に別途取得（取得対象外のため）
-            // TODO done iwata 基点テーブルがMEMBERである必要がないような？MEMBER_SECURITYを基点にして検索でも良いのでは？ by jflute (2026/05/15)
+            // done iwata 基点テーブルがMEMBERである必要がないような？MEMBER_SECURITYを基点にして検索でも良いのでは？ by jflute (2026/05/15)
             String reminder = memberSecurityBhv.selectEntity(cb -> {
                 cb.query().setMemberId_Equal(member.getMemberId());
             }).get().getReminderQuestion();
@@ -145,7 +190,7 @@ public class HandsOn03Test extends UnitContainerTestCase {
             log("memberId: {}, statusCode: {}", member.getMemberId(), code);
             if (!code.equals(prevStatusCode)) {
                 assertFalse(seenCodes.contains(code));
-                // TODO done iwata add()とpreの設定、ifの外でも良いのでは？読み手の負担軽減のために by jflute (2026/05/15)
+                // done iwata add()とpreの設定、ifの外でも良いのでは？読み手の負担軽減のために by jflute (2026/05/15)
                 // ifの中に入ってると、その変数のライフサイクルに分岐があるので、頭の中でちょっと考える。
                 // seenCodesは重複がないsetなので、とにかく毎回突っ込んでseenのcodeたちってニュアンス。
                 // prevStatusCodeはprevの意味が少し変わって、必ず一個前のstatusってニュアンス。
@@ -244,7 +289,7 @@ public class HandsOn03Test extends UnitContainerTestCase {
         // #1on1: このコメントGood, ColumnQueryを知った上でこうしてるってのが伝わる (2026/05/15)
         // ColumnQueryは数値列前提で日付加算をDB側に投げられないため、
         // 「購入日時 ∈ [正式会員日時, 正式会員日時+7日]」はJavaで判定する。
-        // TODO done iwata 一方で、ColumnQueryで日付加算もできるので、チャレンジしてみましょう by jflute (2026/05/15)
+        // done iwata 一方で、ColumnQueryで日付加算もできるので、チャレンジしてみましょう by jflute (2026/05/15)
         ListResultBean<Purchase> purchaseList = purchaseBhv.selectList(cb -> {
             cb.setupSelect_Member().withMemberStatus();
             cb.setupSelect_Member().withMemberSecurityAsOne();
@@ -258,7 +303,7 @@ public class HandsOn03Test extends UnitContainerTestCase {
                 .convert(op -> op.addDay(7));
         });
 
-        // TODO done iwata これはこれで思い出として、コメントアウトとかで残しておきましょう by jflute (2026/05/15)
+        // done iwata これはこれで思い出として、コメントアウトとかで残しておきましょう by jflute (2026/05/15)
 //        List<Purchase> purchaseList = rawList.stream()
 //                .filter(p -> {
 //                    LocalDateTime fd = p.getMember().get().getFormalizedDatetime();
@@ -276,7 +321,7 @@ public class HandsOn03Test extends UnitContainerTestCase {
                     .flatMap(c -> c.getProductCategorySelf())
                     .map(pc -> pc.getProductCategoryName())
                     .orElse(null);
-            // TODO done iwata getPurchaseDatetime()/getFormalizedDatetime()ノイズが多いので、変数にして欲しい by jflute (2026/05/15)
+            // done iwata getPurchaseDatetime()/getFormalizedDatetime()ノイズが多いので、変数にして欲しい by jflute (2026/05/15)
             // ロジカルな行に事務的な処理を含めたくない。ロジカルな行こそロジックに集中して読みたい。
             // こういう配慮がレビューしやすいコードにつながる。
             LocalDateTime purchaseDatetime = purchase.getPurchaseDatetime();
@@ -329,6 +374,7 @@ public class HandsOn03Test extends UnitContainerTestCase {
                     member.getMemberSecurityAsOne().map(s -> s.getReminderAnswer()).orElse("none"),
                     member.getMemberWithdrawalAsOne().map(w -> w.getWithdrawalReasonInputText()).orElse("none"));
             LocalDate birthdate = member.getBirthdate();
+            // #1on1: if文を使わず||でifの論理性を表現してるの、これはこれでOK (2026/05/22)
             assertTrue(birthdate == null || !birthdate.isAfter(LocalDate.of(1974, 12, 31)));
             nullSeen = nullSeen || birthdate == null;
             nonNullSeen = nonNullSeen || birthdate != null;
