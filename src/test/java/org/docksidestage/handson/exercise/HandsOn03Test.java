@@ -3,11 +3,14 @@ package org.docksidestage.handson.exercise;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 
 import javax.annotation.Resource;
 
 import org.dbflute.cbean.result.ListResultBean;
+import org.dbflute.cbean.result.PagingResultBean;
 import org.docksidestage.handson.dbflute.exbhv.MemberBhv;
 import org.docksidestage.handson.dbflute.exbhv.MemberSecurityBhv;
 import org.docksidestage.handson.dbflute.exbhv.PurchaseBhv;
@@ -352,11 +355,10 @@ public class HandsOn03Test extends UnitContainerTestCase {
             cb.specify().specifyMemberSecurityAsOne().columnReminderQuestion();
             cb.specify().specifyMemberSecurityAsOne().columnReminderAnswer();
             cb.specify().specifyMemberWithdrawalAsOne().columnWithdrawalReasonInputText();
-            // TODO iwata orScopeQuery()も悪くないけど、FromToOptionだけで or IsNull も表現できます by jflute (2026/05/15)
-            cb.orScopeQuery(orCB -> {
-                orCB.query().setBirthdate_FromTo(null, borderDate, op -> op.compareAsYear().allowOneSide());
-                orCB.query().setBirthdate_IsNull();
-            });
+            // TODO done iwata orScopeQuery()も悪くないけど、FromToOptionだけで or IsNull も表現できます by jflute (2026/05/15)
+            cb.query().setBirthdate_FromTo(null, borderDate, op ->
+                op.compareAsYear().allowOneSide().orIsNull()
+            );
             cb.query().addOrderBy_Birthdate_Asc().withNullsFirst();
         });
 
@@ -385,6 +387,83 @@ public class HandsOn03Test extends UnitContainerTestCase {
         assertTrue(memberList.stream().anyMatch(m -> Integer.valueOf(3).equals(m.getMemberId())));
         assertFalse(memberList.stream().anyMatch(m -> Integer.valueOf(4).equals(m.getMemberId())));
     }
+
+    // [9] 2005年6月に正式会員になった会員を先に並べて生年月日のない会員を検索
+    public void test_2005年6月に正式会員になった会員を先に並べて生年月日のない会員を検索() throws Exception {
+        // ## Arrange ##
+        // 画面から "2005/06/01" がリクエストされた想定。日付移動はせずそのまま使う
+        String formalizedStr = "2005/06/01";
+        LocalDate formalizedDate = LocalDate.parse(formalizedStr, DateTimeFormatter.ofPattern("yyyy/MM/dd"));
+
+        // ## Act ##
+        ListResultBean<Member> memberList = memberBhv.selectList(cb -> {
+            cb.query().setBirthdate_IsNull();
+            cb.query().addOrderBy_FormalizedDatetime_Asc().withManualOrder(op -> {
+                op.when_FromTo(formalizedDate.atStartOfDay(), formalizedDate.atStartOfDay(), f -> f.compareAsMonth());
+            });
+            cb.query().addOrderBy_MemberId_Desc();
+        });
+
+        // ## Assert ##
+        assertHasAnyElement(memberList);
+        boolean nonJune2005Seen = false;
+        for (Member member : memberList) {
+            log("name: {}, birthdate: {}, formalized: {}",
+                    member.getMemberName(),
+                    member.getBirthdate(),
+                    member.getFormalizedDatetime());
+            assertNull(member.getBirthdate()); // 生年月日が存在しない
+            LocalDateTime formalizedDatetime = member.getFormalizedDatetime();
+            boolean isJune2005 = formalizedDatetime != null
+                    && formalizedDatetime.getYear() == 2005
+                    && formalizedDatetime.getMonthValue() == 6;
+            if (!isJune2005) {
+                nonJune2005Seen = true;
+            }
+            // 2005年6月の会員の前に2025年6月ではない会員が出てはいけない
+            assertFalse(isJune2005 && nonJune2005Seen);
+        }
+    }
+
+    // memo ページング検索とは？のページを読んだ
+    // 排他制御の部分なるほど、普段アプリ側のコードを触ることが少ないので解像度が低かった
+
+    // [10] 全ての会員をページング検索
+    // pageNumberは取得対象のページ、pageSizeは1ページあたりの件数、pageRangeは現在ページの前後N件に絞るもの
+    public void test_全ての会員をページング検索() throws Exception {
+        // ## Arrange ##
+        int pageSize = 3;
+        int pageNumber = 1;
+
+        // ## Act ##
+        // selectPage はカウント検索と実データ検索の2つのSQLを発行する
+        PagingResultBean<Member> page = memberBhv.selectPage(cb -> {
+            cb.setupSelect_MemberStatus();
+            cb.query().addOrderBy_MemberId_Asc();
+            cb.paging(pageSize, pageNumber);
+        });
+
+        // ## Assert ##
+        assertHasAnyElement(page);
+        page.forEach(member -> log("memberId: {}, name: {}, status: {}",
+                member.getMemberId(),
+                member.getMemberName(),
+                member.getMemberStatus().get().getMemberStatusName()));
+        int allRecordCount = memberBhv.selectCount(cb -> {});
+        int expectedAllPageCount = (allRecordCount + pageSize - 1) / pageSize;
+        List<Integer> pageNumberList = page.pageRange(op -> op.rangeSize(3)).createPageNumberList();
+        log("pageNumberList: {}", pageNumberList);
+
+        assertEquals(allRecordCount, page.getAllRecordCount());
+        assertEquals(expectedAllPageCount, page.getAllPageCount());
+        assertEquals(pageSize, page.getPageSize());
+        assertEquals(pageNumber, page.getCurrentPageNumber());
+        assertEquals(pageSize, page.size());
+        assertEquals(Arrays.asList(1, 2, 3, 4), pageNumberList);
+        assertFalse(page.existsPreviousPage());
+        assertTrue(page.existsNextPage());
+    }
+
 
     private void adjustMember_Birthdate() {
         Member m1974 = new Member();
