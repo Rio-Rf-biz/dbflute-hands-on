@@ -85,7 +85,7 @@ public class HandsOn03Test extends UnitContainerTestCase {
                     member.getMemberName(),
                     member.getMemberStatus().map(s -> s.getMemberStatusName()).orElse(null),
                     member.getMemberSecurityAsOne().map(s -> s.getReminderQuestion()).orElse(null));
-            // TODO jflute 1on1にてカージナリティのお話 (2026/05/15)
+            // done jflute 1on1にてカージナリティのお話 (2026/05/15)
             // カージナリティとは？日本語としては「多重度」
             // DBにおいてカージナリティという言葉使う場面が二つ:
             //
@@ -355,7 +355,7 @@ public class HandsOn03Test extends UnitContainerTestCase {
             cb.specify().specifyMemberSecurityAsOne().columnReminderQuestion();
             cb.specify().specifyMemberSecurityAsOne().columnReminderAnswer();
             cb.specify().specifyMemberWithdrawalAsOne().columnWithdrawalReasonInputText();
-            // TODO done iwata orScopeQuery()も悪くないけど、FromToOptionだけで or IsNull も表現できます by jflute (2026/05/15)
+            // done iwata orScopeQuery()も悪くないけど、FromToOptionだけで or IsNull も表現できます by jflute (2026/05/15)
             cb.query().setBirthdate_FromTo(null, borderDate, op ->
                 op.compareAsYear().allowOneSide().orIsNull()
             );
@@ -398,6 +398,11 @@ public class HandsOn03Test extends UnitContainerTestCase {
         // ## Act ##
         ListResultBean<Member> memberList = memberBhv.selectList(cb -> {
             cb.query().setBirthdate_IsNull();
+            // #1on1: ManualOrderのSQL (2026/06/12)
+            // #1on1: えこひいきソート、どんなときに使う？ (2026/06/12)
+            // e.g. 最近ログインした人を先に並べるとか、お得意先を先に並べる
+            // 現場でのManualOrderを見てみた。
+            // #1on1: adminというシステムの存在のお話 (2026/06/12)
             cb.query().addOrderBy_FormalizedDatetime_Asc().withManualOrder(op -> {
                 op.when_FromTo(formalizedDate.atStartOfDay(), formalizedDate.atStartOfDay(), f -> f.compareAsMonth());
             });
@@ -405,6 +410,8 @@ public class HandsOn03Test extends UnitContainerTestCase {
         });
 
         // ## Assert ##
+        // TODO iwata 万が一6月のデータがなかったときに検知できるようにしてみよう by jflute (2026/06/12)
+        // TODO iwata 万が一6月のデータしかなかったときに検知できるようにしてみよう by jflute (2026/06/12)
         assertHasAnyElement(memberList);
         boolean nonJune2005Seen = false;
         for (Member member : memberList) {
@@ -427,6 +434,7 @@ public class HandsOn03Test extends UnitContainerTestCase {
 
     // memo ページング検索とは？のページを読んだ
     // 排他制御の部分なるほど、普段アプリ側のコードを触ることが少ないので解像度が低かった
+    // #1on1: 実直さが武器になる (2026/06/12)
 
     // [10] 全ての会員をページング検索
     // pageNumberは取得対象のページ、pageSizeは1ページあたりの件数、pageRangeは現在ページの前後N件に絞るもの
@@ -437,6 +445,8 @@ public class HandsOn03Test extends UnitContainerTestCase {
 
         // ## Act ##
         // selectPage はカウント検索と実データ検索の2つのSQLを発行する
+        // #1on1: ページングの様々な配慮の話 (2026/06/12)
+        // さらに、MySQLのfound_rows()の話。ManualThreadDataSourceHandlerの話も。
         PagingResultBean<Member> page = memberBhv.selectPage(cb -> {
             cb.setupSelect_MemberStatus();
             cb.query().addOrderBy_MemberId_Asc();
@@ -463,7 +473,9 @@ public class HandsOn03Test extends UnitContainerTestCase {
         assertFalse(page.existsPreviousPage());
         assertTrue(page.existsNextPage());
     }
-
+    
+    // #1on1: カーソル検索はいったんスキップで、区分値の方に進んじゃってOK (2026/06/12)
+    // 区分値の自動生成まで体験してもらいたい。
 
     private void adjustMember_Birthdate() {
         Member m1974 = new Member();
